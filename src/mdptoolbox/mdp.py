@@ -215,6 +215,7 @@ class MDP(object):
 
         self.S, self.A = _computeDimensions(transitions)
         self.P = self._computeTransition(transitions)
+        self.transition_is_sparse = not isinstance(transitions, _np.ndarray)
         self.R = self._computeReward(reward, transitions)
 
         # the verbosity is by default turned off
@@ -1397,15 +1398,26 @@ class ValueIteration(MDP):
         k = 0
         h = _np.zeros(self.S)
 
-        for ss in range(self.S):
-            PP = _np.zeros((self.A, self.S))
-            for aa in range(self.A):
-                try:
-                    PP[aa] = self.P[aa][:, ss]
-                except ValueError:
-                    PP[aa] = self.P[aa][:, ss].todense().A1
-            # minimum of the entire array.
-            h[ss] = PP.min()
+        if self.transition_is_sparse:
+            for ss in range(self.S):
+                PP = _np.zeros((self.A, self.S))
+                for aa in range(self.A):
+                    try:
+                        PP[aa] = self.P[aa].getcol(ss)
+                    except ValueError:
+                        PP[aa] = _np.ravel(self.P[aa].getcol(ss).todense())
+                # minimum of the entire array.
+                h[ss] = PP.min()
+        else:
+            for ss in range(self.S):
+                PP = _np.zeros((self.A, self.S))
+                for aa in range(self.A):
+                    try:
+                        PP[aa] = self.P[aa][:, ss]
+                    except ValueError:
+                        PP[aa] = self.P[aa][:, ss].todense().A1
+                # minimum of the entire array.
+                h[ss] = PP.min()
 
         k = 1 - h.sum()
         Vprev = self.V
@@ -1546,42 +1558,84 @@ class ValueIterationGS(ValueIteration):
     def run(self):
         # Run the value iteration Gauss-Seidel algorithm.
 
-        self._startRun()
+        if self.transition_is_sparse:
+            self._startRun()
 
-        while True:
-            self.iter += 1
+            while True:
+                self.iter += 1
 
-            Vprev = self.V.copy()
+                Vprev = self.V.copy()
 
+                for s in range(self.S):
+                    Q = [float(self.R[a][s] +
+                            self.discount * self.P[a].getrow(s).dot(self.V))
+                        for a in range(self.A)]
+
+                    self.V[s] = max(Q)
+
+                variation = _util.getSpan(self.V - Vprev)
+
+                if self.verbose:
+                    _printVerbosity(self.iter, variation)
+
+                if variation < self.thresh:
+                    if self.verbose:
+                        print(_MSG_STOP_EPSILON_OPTIMAL_POLICY)
+                    break
+                elif self.iter == self.max_iter:
+                    if self.verbose:
+                        print(_MSG_STOP_MAX_ITER)
+                    break
+        else:
+            self._startRun()
+
+            while True:
+                self.iter += 1
+
+                Vprev = self.V.copy()
+
+                for s in range(self.S):
+                    Q = [float(self.R[a][s] +
+                            self.discount * self.P[a][s, :].dot(self.V))
+                        for a in range(self.A)]
+
+                    self.V[s] = max(Q)
+
+                variation = _util.getSpan(self.V - Vprev)
+
+                if self.verbose:
+                    _printVerbosity(self.iter, variation)
+
+                if variation < self.thresh:
+                    if self.verbose:
+                        print(_MSG_STOP_EPSILON_OPTIMAL_POLICY)
+                    break
+                elif self.iter == self.max_iter:
+                    if self.verbose:
+                        print(_MSG_STOP_MAX_ITER)
+                    break
+
+        if self.transition_is_sparse:
+            self.policy = []
             for s in range(self.S):
-                Q = [float(self.R[a][s] +
-                           self.discount * self.P[a][s, :].dot(self.V))
-                     for a in range(self.A)]
+                Q = _np.zeros(self.A)
+                for a in range(self.A):
+                    Q[a] = (self.R[a][s] +
+                            self.discount * self.P[a].getrow(s).dot(self.V))
 
-                self.V[s] = max(Q)
+                self.V[s] = Q.max()
+                self.policy.append(int(Q.argmax()))
 
-            variation = _util.getSpan(self.V - Vprev)
+        else:
+            self.policy = []
+            for s in range(self.S):
+                Q = _np.zeros(self.A)
+                for a in range(self.A):
+                    Q[a] = (self.R[a][s] +
+                            self.discount * self.P[a][s, :].dot(self.V))
 
-            if self.verbose:
-                _printVerbosity(self.iter, variation)
+                self.V[s] = Q.max()
+                self.policy.append(int(Q.argmax()))
 
-            if variation < self.thresh:
-                if self.verbose:
-                    print(_MSG_STOP_EPSILON_OPTIMAL_POLICY)
-                break
-            elif self.iter == self.max_iter:
-                if self.verbose:
-                    print(_MSG_STOP_MAX_ITER)
-                break
-
-        self.policy = []
-        for s in range(self.S):
-            Q = _np.zeros(self.A)
-            for a in range(self.A):
-                Q[a] = (self.R[a][s] +
-                        self.discount * self.P[a][s, :].dot(self.V))
-
-            self.V[s] = Q.max()
-            self.policy.append(int(Q.argmax()))
 
         self._endRun()
