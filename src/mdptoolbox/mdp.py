@@ -750,6 +750,11 @@ class PolicyIteration(MDP):
         if self.verbose:
             _printVerbosity("Iteration", "V variation")
 
+        if self.discount == 1.:
+            threshold_ = epsilon
+        else:
+            threshold_ = ((1 - self.discount) / self.discount) * epsilon
+
         itr = 0
         done = False
         while not done:
@@ -763,7 +768,7 @@ class PolicyIteration(MDP):
                 _printVerbosity(itr, variation)
 
             # ensure |Vn - Vpolicy| < epsilon
-            if variation < ((1 - self.discount) / self.discount) * epsilon:
+            if variation < threshold_:
                 done = True
                 if self.verbose:
                     print(_MSG_STOP_EPSILON_OPTIMAL_VALUE)
